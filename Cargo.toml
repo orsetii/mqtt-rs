@@ -1,0 +1,8 @@
+[package]
+name = "mqtt-rs"
+version = "0.1.1"
+edition = "2018"
+
+
+[dependencies]
+nom = "6.2.1"
