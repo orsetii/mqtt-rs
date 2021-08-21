@@ -1,4 +1,3 @@
-#[macro_use]
 extern crate num_enum;
 pub mod server;
 pub mod packet;

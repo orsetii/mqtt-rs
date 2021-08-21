@@ -7,29 +7,78 @@ use super::super::*;
 pub struct FixedHeader {
     r#type: Type,
     flags:  u8,
-    remaining_length: u32
+    publish_flags: Option<flags::PublishFlags>,
+    remaining_length: u32,
 }
 
 impl FixedHeader {
-    pub fn new(r#type: Type, flags: u8, remaining_length: u32) -> Self {
+    pub fn new(r#type: Type, flags: u8, remaining_length: u32, publish_flags: Option<flags::PublishFlags> ) -> Self {
         Self {
             r#type,
             flags,
-            remaining_length
+            remaining_length,
+            publish_flags,
         }
     }
     /// Attempts to construct a `FixedHeader` from a byte buffer.
-    pub fn parse_from_buf(buf: &'_ [u8]) -> Result<FixedHeader> {
+    pub fn parse_from_vec(buf: Vec<u8>) -> Result<FixedHeader> {
 
-        
+        let r#type = Self::parse_type(buf[0]);
+        let flags = Self::parse_flags(buf[0], r#type)?;
+        let remaining_length = Self::parse_remaining_length(&buf[1..5])?;
+        let publish_flags = match r#type {
+            Type::Publish => Some(flags::PublishFlags::from(flags)),
+            _             => None,
+        };
+        Ok(Self::new(r#type, flags, remaining_length, publish_flags))
     }
 
-    fn parse_type(byte: u8) -> Option<Type> {
-        Type::try_from(byte >> 4).ok()
+    fn parse_type(byte: u8) -> Type {
+        // This is literally impossible to fail as we 
+        // account for 2^4 possible values
+        Type::try_from(byte >> 4).unwrap()
     }
     /// dummy function that calls `Type::check_reserved_flags`
-    fn parse_flags(byte: u8, r#type: Type) -> bool {
-        r#type.check_reserved_flags(byte)
+    fn parse_flags(byte: u8, r#type: Type) -> Result<u8> {
+        let byte = byte & 0x0F;
+        if r#type == Type::Publish {
+            return Ok(byte);
+        }
+        match r#type.check_reserved_flags(byte) {
+            false => Err(ParseError::InvalidFlags{
+                expected: r#type.map_to_reserved_flags(),
+                found: byte,
+            }),
+            true => Ok(byte),
+        }
+
+    }
+    fn parse_remaining_length(bytes: &'_ [u8]) -> Result<u32> {
+        let mut total: u32 = 0;
+        // SO THIS WORKS BUT THE ONE IN THE LOOP
+        // FUCKING DOESNT AHHH TOFIX  AJKFGKAJGNkj
+        let curr = bytes[0];
+        if bytes[0] == curr {
+            println!("yo")
+        }
+        for i in 0..4 {
+            let curr = bytes[i];
+            let first_7_bits = curr & 0b01111111;
+            // what the actual fuck
+            // how the fuck does the line below fail
+            // IM COMPARING TWO SIMPLE FUCKING u8 VALUES????!?!?!?
+            if curr == first_7_bits {
+                break;
+            }
+            total = (total << 7) | first_7_bits as u32;
+        }
+        if total == 0 {
+            return Err(ParseError::InvalidHeader{
+                expected: "a remaining length field of more than 0".to_string(), 
+                found: format!("{}", total)
+            });
+        }
+        Ok(total)
     }
 }
 
@@ -78,7 +127,7 @@ impl FixedHeader {
 /// | AUTH        | 15        | Client to Server or | Authentication exchange                  |
 /// |             |           |   Server to Client  |                                          |
 /// +-------------+-----------+---------------------+------------------------------------------+
-#[derive(TryFromPrimitive, Debug)]
+#[derive(TryFromPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Type {
    Reserved     = 0,
@@ -100,12 +149,11 @@ pub enum Type {
 }
 
 impl Type {
-
-    /// returns a true/false if the flags match the reserved 
-    /// value for the specified `Type`.
-    pub fn check_reserved_flags(&self, val: u8) -> bool {
+    #[inline(always)]
+    pub fn map_to_reserved_flags(&self) -> u8 {
         use flags::*;
-        let reserved_bits = match *self {
+        match *self {
+            Type::Reserved => unreachable!(),
             Type::Connect => CONNECT,
             Type::ConnAck => CONNACK,
             Type::PubAck  => PUBACK,
@@ -121,7 +169,13 @@ impl Type {
             Type::Disconnect => DISCONNECT,
             Type::Auth => AUTH,
             Type::Publish => unreachable!(),
-        };
+        }
+    }
+
+    /// returns a true/false if the flags match the reserved 
+    /// value for the specified `Type`.
+    pub fn check_reserved_flags(&self, val: u8) -> bool {
+        let reserved_bits = self.map_to_reserved_flags();
         // Nothing is harmed by ANDing the value like this,
         // but if provided a value such as the 1st byte
         // of the fixed header without the Type bits stripped,
@@ -131,7 +185,6 @@ impl Type {
 }
 
 pub mod flags {
-    use super::*;
     use bitflags::bitflags;
     pub const CONNECT: u8 = 0b0000;
     pub const CONNACK: u8 = 0b0000;
@@ -162,18 +215,38 @@ pub mod flags {
         qos: QosLevel,
         retain: bool
     }
+    impl From<u8> for PublishFlags {
+        fn from(v: u8) -> Self {
+            Self {
+                dup: (v >> 3) == 1,
+                // This isnt capable of failing so safe unwrap.
+                qos: QosLevel::from(v & 0b0110),
+               retain: (v & 0b1) == 1, 
+            }
+        }
+    }
 
-    #[derive(TryFromPrimitive, Debug)]
+    #[derive(Debug, PartialEq, Eq)]
     #[repr(u8)]
     pub enum QosLevel {
         Zero = 0,
         One  = 1,
         Two  = 2,
+        Unknown
+    }
+    impl From<u8> for QosLevel {
+        fn from(v: u8) -> QosLevel {
+            use QosLevel::*;
+            match v {
+                0 => Zero,
+                1 => One,
+                2 => Two,
+                _ => Unknown,
+            }
+        }
     }
 
-    pub fn parse_qos_level(qos_val: u8) -> Result<QosLevel> {
-        QosLevel::try_from(qos_val).map_err(|_| ParseError::InvalidQos(format!("{}", qos_val)))
-    }
+
 
     #[cfg(test)]
     mod tests {
@@ -181,15 +254,23 @@ pub mod flags {
 
         #[test]
         fn test_qos_flags() {
-            let f = flags::PUBLISH::from_bits(0b0110).unwrap();
-            assert_eq!(f, flags::PUBLISH::QOS);
+            let f = PUBLISH::from_bits(0b0110).unwrap();
+            assert_eq!(f, PUBLISH::QOS);
         }
 
         // Checking that we always fail with the exact correct message on all possible failure values.
         #[test]
         fn test_qos_parsing() {
             for i in 3..=8 {
-                assert_eq!(parse_qos_level(i).unwrap_err(), ParseError::InvalidQos(format!("{}", i)))
+                assert_eq!(QosLevel::from(i), QosLevel::Unknown);
+            }
+        }
+        #[test]
+        fn test_header_parsing() {
+            let f = [0x30, 0x16, 0x00, 0x0f, 0x4c, 0x75, 0x61, 0x20, 0x53, 0x65, 0x6e, 0x64, 0x65, 0x72, 0x20, 0x54, 0x65, 0x73, 0x74, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a];
+            let hdr = super::super::FixedHeader::parse_from_vec(Vec::from(f));
+            if hdr.is_err() {
+                panic!();
             }
         }
     }

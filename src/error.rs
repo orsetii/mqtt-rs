@@ -12,7 +12,12 @@ pub enum ParseError {
         found: String,
     },
     #[error("invalid QoS level (must be 0 >= 2, found {0})")]
-    InvalidQos(String),
+    InvalidQos(u8),
+    #[error("invalid flag bits(expected {expected:0b} found {found:0b})")]
+    InvalidFlags{
+        expected: u8,
+        found: u8,
+    },
     #[error("unknown mqtt error")]
     Unknown,
 }

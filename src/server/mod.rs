@@ -14,19 +14,4 @@ use super::{packet::{FixedHeader, ControlPacket, VariableHeader}, Result, ParseE
 /// | Payload, present in                    |
 /// |   some MQTT Control Packets            |
 /// +----------------------------------------+
-pub fn parse_packet(buf: &'_ [u8]) -> Result<ControlPacket> {
-
-    Err(ParseError::Unknown)
-}
-
-
-
-fn parse_fixed_header(buf: &'_ [u8]) -> Result<FixedHeader> {
-    
-    Err(ParseError::Unknown)
-}
-
-fn parse_variable_header(buf: &'_ [u8]) -> Result<VariableHeader> {
-
-    Err(ParseError::Unknown)
-}
+fn bob() {} // TODO REMOVE
