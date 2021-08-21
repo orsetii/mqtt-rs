@@ -1,28 +1,18 @@
-use std::error::Error;
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MqttError {
-    details: String,
+#[derive(Error, Debug, PartialEq)]
+pub enum ParseError {
+    //#[error("data store disconnected")]
+    //Disconnect(#[from] io::Error),
+    #[error("the data for key `{0}` is not available")]
+    Redaction(String),
+    #[error("invalid header (expected {expected:?}, found {found:?})")]
+    InvalidHeader {
+        expected: String,
+        found: String,
+    },
+    #[error("invalid QoS level (must be 0 >= 2, found {0})")]
+    InvalidQos(String),
+    #[error("unknown mqtt error")]
+    Unknown,
 }
-
-impl MqttError {
-    fn new(msg: &str) -> MqttError {
-        MqttError{details: msg.to_string()}
-    }
-}
-
-impl fmt::Display for MqttError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,"{}",self.details)
-    }
-}
-
-impl Error for MqttError {
-    fn description(&self) -> &str {
-        &self.details
-    }
-}
-
-
-pub type Result<T> = std::result::Result<T,MqttError>;

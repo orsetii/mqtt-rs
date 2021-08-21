@@ -1,10 +1,8 @@
 #[macro_use]
-extern crate nom;
-
-pub mod client;
+extern crate num_enum;
 pub mod server;
-mod transport;
-mod utils;
+pub mod packet;
 mod error;
 
-pub use error::{Result, MqttError};
+pub use error::ParseError;
+pub type Result<T> = std::result::Result<T, error::ParseError>;
