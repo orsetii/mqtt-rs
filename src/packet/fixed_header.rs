@@ -1,18 +1,22 @@
+use super::super::*;
 use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
-use super::super::*;
-
 
 #[derive(Debug)]
 pub struct FixedHeader {
     r#type: Type,
-    flags:  u8,
+    flags: u8,
     publish_flags: Option<flags::PublishFlags>,
-    remaining_length: u32,
+    remaining_length: RemainingLength,
 }
 
 impl FixedHeader {
-    pub fn new(r#type: Type, flags: u8, remaining_length: u32, publish_flags: Option<flags::PublishFlags> ) -> Self {
+    pub fn new(
+        r#type: Type,
+        flags: u8,
+        remaining_length: RemainingLength,
+        publish_flags: Option<flags::PublishFlags>,
+    ) -> Self {
         Self {
             r#type,
             flags,
@@ -22,19 +26,18 @@ impl FixedHeader {
     }
     /// Attempts to construct a `FixedHeader` from a byte buffer.
     pub fn parse_from_vec(buf: Vec<u8>) -> Result<FixedHeader> {
-
         let r#type = Self::parse_type(buf[0]);
         let flags = Self::parse_flags(buf[0], r#type)?;
         let remaining_length = Self::parse_remaining_length(&buf[1..5])?;
         let publish_flags = match r#type {
             Type::Publish => Some(flags::PublishFlags::from(flags)),
-            _             => None,
+            _ => None,
         };
         Ok(Self::new(r#type, flags, remaining_length, publish_flags))
     }
 
     fn parse_type(byte: u8) -> Type {
-        // This is literally impossible to fail as we 
+        // This is literally impossible to fail as we
         // account for 2^4 possible values
         Type::try_from(byte >> 4).unwrap()
     }
@@ -45,44 +48,49 @@ impl FixedHeader {
             return Ok(byte);
         }
         match r#type.check_reserved_flags(byte) {
-            false => Err(ParseError::InvalidFlags{
+            false => Err(ParseError::InvalidFlags {
                 expected: r#type.map_to_reserved_flags(),
                 found: byte,
             }),
             true => Ok(byte),
         }
-
     }
-    fn parse_remaining_length(bytes: &'_ [u8]) -> Result<u32> {
+    fn parse_remaining_length(bytes: &'_ [u8]) -> Result<RemainingLength> {
         let mut total: u32 = 0;
-        // SO THIS WORKS BUT THE ONE IN THE LOOP
-        // FUCKING DOESNT AHHH TOFIX  AJKFGKAJGNkj
-        let curr = bytes[0];
-        if bytes[0] == curr {
-            println!("yo")
-        }
-        for i in 0..4 {
-            let curr = bytes[i];
-            let first_7_bits = curr & 0b01111111;
-            // what the actual fuck
-            // how the fuck does the line below fail
-            // IM COMPARING TWO SIMPLE FUCKING u8 VALUES????!?!?!?
-            if curr == first_7_bits {
-                break;
+        // for some reason we panic if we do this in a loop,
+        // so this cursed monster will have to do
+        let mut i = 0;
+        total = (total << 7) | (bytes[i] & 0b01111111) as u32;
+        if (bytes[i] & 0b10000000) == 1 {
+            i += 1;
+            total = (total << 7) | (bytes[i] & 0b01111111) as u32;
+            if (bytes[i] & 0b10000000) == 1 {
+                i += 1;
+                total = (total << 7) | (bytes[i] & 0b01111111) as u32;
+                if (bytes[i] & 0b10000000) == 1 {
+                    i += 1;
+                    total = (total << 7) | (bytes[i] & 0b01111111) as u32;
+                    // There shouldn't(?) be a cont bit here, i dont think. Check
+                    if (bytes[i + 1] & 0b10000000) == 1 {
+                        println!("There is a cont bit here on the 4th byte. {:0b}", bytes[3]);
+                    }
+                }
             }
-            total = (total << 7) | first_7_bits as u32;
         }
+        println!("{}", total);
         if total == 0 {
-            return Err(ParseError::InvalidHeader{
-                expected: "a remaining length field of more than 0".to_string(), 
-                found: format!("{}", total)
+            return Err(ParseError::InvalidHeader {
+                expected: "a remaining length field of more than 0".to_string(),
+                found: format!("{}", total),
             });
         }
-        Ok(total)
+        Ok(RemainingLength {
+            length: total,
+            size: i,
+            raw_field: bytes[0..=i].to_vec()
+        })
     }
 }
-
-
 
 /// +-------------+-----------+---------------------+------------------------------------------+
 /// |   Name      |   Value   |   Direction of      |   Description                            |
@@ -130,22 +138,22 @@ impl FixedHeader {
 #[derive(TryFromPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Type {
-   Reserved     = 0,
-   Connect      = 1,
-   ConnAck      = 2,
-   Publish      = 3,
-   PubAck       = 4,
-   PubRec       = 5,
-   PubRel       = 6,
-   PubComp      = 7,
-   Subscribe    = 8,
-   SubAck       = 9,
-   Unsubscribe  = 10,
-   UnsubAck     = 11,
-   PingReq      = 12,
-   PingResp     = 13,
-   Disconnect   = 14,
-   Auth         = 15,
+    Reserved = 0,
+    Connect = 1,
+    ConnAck = 2,
+    Publish = 3,
+    PubAck = 4,
+    PubRec = 5,
+    PubRel = 6,
+    PubComp = 7,
+    Subscribe = 8,
+    SubAck = 9,
+    Unsubscribe = 10,
+    UnsubAck = 11,
+    PingReq = 12,
+    PingResp = 13,
+    Disconnect = 14,
+    Auth = 15,
 }
 
 impl Type {
@@ -156,12 +164,12 @@ impl Type {
             Type::Reserved => unreachable!(),
             Type::Connect => CONNECT,
             Type::ConnAck => CONNACK,
-            Type::PubAck  => PUBACK,
-            Type::PubRec  => PUBREC,
-            Type::PubRel  => PUBREL,
+            Type::PubAck => PUBACK,
+            Type::PubRec => PUBREC,
+            Type::PubRel => PUBREL,
             Type::PubComp => PUBCOMP,
             Type::Subscribe => SUBSCRIBE,
-            Type::SubAck    => SUBACK,
+            Type::SubAck => SUBACK,
             Type::Unsubscribe => UNSUBSCRIBE,
             Type::UnsubAck => UNSUBACK,
             Type::PingReq => PINGREQ,
@@ -172,7 +180,7 @@ impl Type {
         }
     }
 
-    /// returns a true/false if the flags match the reserved 
+    /// returns a true/false if the flags match the reserved
     /// value for the specified `Type`.
     pub fn check_reserved_flags(&self, val: u8) -> bool {
         let reserved_bits = self.map_to_reserved_flags();
@@ -182,6 +190,13 @@ impl Type {
         // it will still work as intended.
         (val & 0b00001111) == reserved_bits
     }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RemainingLength {
+    length: u32,
+    size: usize,
+    raw_field: Vec<u8>
 }
 
 pub mod flags {
@@ -213,7 +228,7 @@ pub mod flags {
     pub struct PublishFlags {
         dup: bool,
         qos: QosLevel,
-        retain: bool
+        retain: bool,
     }
     impl From<u8> for PublishFlags {
         fn from(v: u8) -> Self {
@@ -221,7 +236,7 @@ pub mod flags {
                 dup: (v >> 3) == 1,
                 // This isnt capable of failing so safe unwrap.
                 qos: QosLevel::from(v & 0b0110),
-               retain: (v & 0b1) == 1, 
+                retain: (v & 0b1) == 1,
             }
         }
     }
@@ -230,9 +245,9 @@ pub mod flags {
     #[repr(u8)]
     pub enum QosLevel {
         Zero = 0,
-        One  = 1,
-        Two  = 2,
-        Unknown
+        One = 1,
+        Two = 2,
+        Unknown,
     }
     impl From<u8> for QosLevel {
         fn from(v: u8) -> QosLevel {
@@ -245,8 +260,6 @@ pub mod flags {
             }
         }
     }
-
-
 
     #[cfg(test)]
     mod tests {
@@ -265,17 +278,35 @@ pub mod flags {
                 assert_eq!(QosLevel::from(i), QosLevel::Unknown);
             }
         }
-        #[test]
-        fn test_header_parsing() {
-            let f = [0x30, 0x16, 0x00, 0x0f, 0x4c, 0x75, 0x61, 0x20, 0x53, 0x65, 0x6e, 0x64, 0x65, 0x72, 0x20, 0x54, 0x65, 0x73, 0x74, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a];
-            let hdr = super::super::FixedHeader::parse_from_vec(Vec::from(f));
-            if hdr.is_err() {
-                panic!();
-            }
-        }
     }
-
 }
 
-// TODO: make some tests here...
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn test_header_parsing_connect() {
+        let f = std::fs::read("test_data/connect.packet").unwrap();
+        println!("{:#x?}", f);
+        let hdr = FixedHeader::parse_from_vec(f).unwrap();
+        println!("{:#?}", hdr);
+    }
+    #[test]
+    fn test_header_parsing_publish() {
+        let f = std::fs::read("test_data/publish_sampletopic.packet").unwrap();
+        println!("{:#x?}", f);
+        let hdr = FixedHeader::parse_from_vec(f).unwrap();
+        assert!(hdr.r#type == Type::Publish);
+    }
+    #[test]
+    fn test_header_parsing_connect_ack() {
+        let f = std::fs::read("test_data/connect_ack.packet").unwrap();
+        println!("{:#x?}", f);
+        let hdr = FixedHeader::parse_from_vec(f).unwrap();
+        assert!(hdr.r#type == Type::ConnAck);
+        assert!(hdr.flags == flags::CONNACK);
+        assert!(hdr.publish_flags.is_none());
+        assert!(hdr.remaining_length.length == 2);
+    }
+}
